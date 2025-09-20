@@ -1,0 +1,455 @@
+#!/usr/bin/env bash
+# kshook-wine — Wine injector with configuration support
+# Usage:
+#   ./kshook-wine init                         # Initialize configuration
+#   ./kshook-wine [--prefix PATH] [--injector PATH] [--dll PATH] [--process-name NAME]
+
+set -euo pipefail
+
+# Configuration
+CONFIG_DIR="$HOME/.config/kshook-wine"
+CONFIG_FILE="config"
+
+# defaults
+PREFIX=""
+INJECTOR=""
+DLL=""
+PROCESS_NAME="sv6c.exe"
+
+#colors
+RESET="\e[0m"
+GREEN="\e[32m"
+RED="\e[31m"
+LIGHT_YELLOW="\e[93m"
+LIGHT_GREEN="\e[92m"
+LIGHT_MAGENTA="\e[95m"
+LIGHT_RED="\e[91m"
+
+usage() {
+    cat << 'EOF'
+kshook-wine — SOUND VOLTEX EXCEED GEAR KONASTE HOOK Wine injector
+
+Inject kshook on SDVX Konaste running in Wine for score submission to a Tachi instance
+
+Usage:
+  ./kshook-wine init
+  ./kshook-wine [--prefix PATH] [--injector PATH] [--dll PATH] [--process-name NAME]
+
+Commands:
+  init                  Initialize configuration (interactive setup)
+
+Options:
+  --prefix PATH         WINEPREFIX path
+  --injector PATH       Windows path to Injector.exe
+  --dll PATH            Windows path to DLL to inject
+  --process-name NAME   Process name (default: sv6c.exe)
+  -h|--help            Show this help
+EOF
+    exit 0
+}
+
+sanitize_path() {
+    # Sanitize user input paths
+    local input="$1"
+    input="${input/#\~/$HOME}"
+    input="${input//$'\r'/}"
+    input="${input#\"}"
+    input="${input%\"}"
+    input="${input#"${input%%[![:space:]]*}"}"
+    input="${input%"${input##*[![:space:]]}"}"
+    input="${input//\\ / }"
+    input="${input%/}"
+    printf '%s\n' "$input"
+}
+
+
+init_config() {
+    echo -e "${LIGHT_RED}[*] kshook-wine initialization${RESET}"
+    echo -e "${LIGHT_YELLOW}Usage of this script assumes that you have already setup a WINE Prefix for SDVX and the game is able to launch."
+    echo -e "If you haven't done this yet, it is suggested you try \e]8;;https://github.com/mizztgc/konaste-linux\e\\https://github.com/mizztgc/konaste-linux\e]8;;\e\\ for a streamlined setup script${RESET}"
+    echo
+    echo -ne "${LIGHT_MAGENTA}Is SDVX currently launchable on your system? [y/N]${RESET} "
+    read -r sdvx_launchable
+    if [[ ! "$sdvx_launchable" =~ ^[Yy]$ ]]; then
+        echo -e "${RED}Please ensure SDVX Konaste is properly set up and launchable before proceeding with kshook-wine initialization.${RESET}"
+        exit 1
+    fi
+
+    # --- CREATING CONFIGURATION FILE ---
+    local full_config_path="$CONFIG_DIR/$CONFIG_FILE"
+    echo "Configuration will be saved to: $full_config_path"
+    echo
+
+    # Create config directory if it doesn't exist
+    if [[ ! -d "$CONFIG_DIR" ]]; then
+        echo "${LIGHT_RED}[*] Creating config directory: $CONFIG_DIR${RESET}"
+        mkdir -p "$CONFIG_DIR" || { echo "ERROR: Failed to create config directory"; exit 1; }
+    fi
+
+    # Check if config already exists
+    if [[ -f "$full_config_path" ]]; then
+        echo "Configuration file already exists: $full_config_path"
+        echo -n "Do you want to overwrite it? [y/N]: "
+        read -r response
+        if [[ "$response" != "y" && "$response" != "Y" ]]; then
+            echo "${LIGHT_RED}[*] Initialization cancelled.${RESET}"
+            exit 0
+        fi
+    fi
+
+    # --- INIT SCRIPT SET DEFAULT PATHS ---
+
+    # Set path for default WINE PREFIX to use
+    if [[ -n "$HOME/.local/share/konaste" ]]; then
+        echo -e "${LIGHT_YELLOW}konaste-linux ${RESET}installation was found at: ${LIGHT_YELLOW}$HOME/.local/share/konaste${RESET}"
+        echo -ne "${LIGHT_MAGENTA}Do you want to configure it as your WINE prefix? [y/N]${RESET} "
+        read -p "" answer
+        if [[ "$answer" == "y" || "$answer" == "Y" ]]; then
+            prefix_input="$HOME/.local/share/konaste"
+        fi
+    fi
+    # Get PREFIX
+    while [[ -z $prefix_input ]]; do
+        echo -ne "Enter the ${LIGHT_GREEN}WINEPREFIX${RESET} path used by WINE when launching SDVX (Linux path to directory containing drive_c): "
+        read -e -r prefix_input
+        prefix_input=$(sanitize_path "$prefix_input")
+        if [[ -z "$prefix_input" ]]; then
+            echo -e "${RED}ERROR: Path cannot be empty${RESET}"
+            prefix_input=""
+            continue
+        fi
+        if [[ ! -d "$prefix_input" ]]; then
+            echo -e "${RED}ERROR: Directory not found: $prefix_input${RESET}"
+            prefix_input=""
+            continue
+        fi
+        if [[ ! -d "$prefix_input/drive_c" ]]; then
+            echo -e "${RED}ERROR: PREFIX appears invalid (no drive_c directory): $prefix_input${RESET}"
+            prefix_input=""
+            continue
+        fi
+        break
+    done
+    echo -e "${GREEN}WINE PREFIX set as: ${prefix_input}${RESET}"
+    echo
+
+    # Set path for default Injector.exe
+    # DOWNLOAD Injector.exe
+    echo -e "${LIGHT_YELLOW}Injector.exe${RESET} is needed to inject ${LIGHT_YELLOW}kshook.dll${RESET} into the game at runtime (\e]8;;https://github.com/nefarius/Injector/releases/latest\e\\https://github.com/nefarius/Injector/releases/latest\e]8;;\e\\)"
+    echo -ne "${LIGHT_MAGENTA}Would you like to automatically download and extract the Injector.exe? [y/N] ${RESET} "
+    read -r download_confirm
+    if [[ "$download_confirm" =~ ^[Yy]$ ]]; then
+        echo -e "${LIGHT_GREEN}Downloading injector...${RESET}"
+        temp_dir=$(mktemp -d -p /tmp)
+        if curl -L -o "$temp_dir/injector.zip" "https://github.com/nefarius/Injector/releases/latest/download/Injector_x86_amd64_arm64.zip"; then
+            echo -e "${LIGHT_GREEN}Extracting injector...${RESET}"
+            echo
+            if command -v unzip >/dev/null 2>&1; then
+                unzip -q "$temp_dir/injector.zip" -d "$temp_dir"
+                if [[ -f "$temp_dir/x64/Injector.exe" ]]; then
+                    echo -e "Enter the path to your SDVX game folder (The same folder where you put ${LIGHT_YELLOW}kshook.dll${RESET} it's configuration JSON)"
+                    echo -e "This is typically the '${LIGHT_YELLOW}drive_c/Games/SOUND VOLTEX EXCEED GEAR${RESET}' inside of your ${LIGHT_YELLOW}WINE Prefix${RESET}"
+                    read -e -r sdvx_folder
+                    sdvx_folder=$(sanitize_path "$sdvx_folder")
+                    if [[ -d "$sdvx_folder" ]]; then
+                        cp "$temp_dir/x64/Injector.exe" "$sdvx_folder/"
+                        echo -e "${GREEN}Injector copied to: $sdvx_folder/Injector.exe${RESET}"
+                        injector_input="$sdvx_folder/Injector.exe"
+                    else
+                        echo -e "${RED}ERROR: SDVX game folder not found: $sdvx_folder${RESET}"
+                    fi
+                else
+                    echo -e "${RED}ERROR: Injector.exe not found in the x64 folder of the downloaded archive${RESET}"
+                fi
+            else
+                echo -e "${RED}ERROR: unzip command not found. Please install unzip.${RESET}"
+            fi
+        else
+            echo -e "${RED}ERROR: Failed to download injector${RESET}"
+        fi
+        rm -rf "$temp_dir"
+    fi
+
+    # Manual enter path to injector file
+    while [[ -z $injector_input ]]; do
+        echo -ne "Enter the path to ${LIGHT_GREEN}'Injector.exe'${RESET} (A Linux/UNIX-styled path): "
+        read -e -r injector_input
+        injector_input=$(sanitize_path "$injector_input")
+        if [[ -z "$injector_input" ]]; then
+            echo -e "${RED}ERROR: Path cannot be empty${RESET}"
+            injector_input=""
+            continue
+        fi
+
+        if [[ ! -f "$injector_input" ]]; then
+            echo -e "${RED}ERROR: File not found: $injector_input${RESET}"
+            injector_input=""
+            continue
+        fi
+        if [[ "$injector_input" != *.exe ]]; then
+                echo -e "${LIGHT_YELLOW}WARNING: The specified path does not end with '.exe': $injector_input${RESET}"
+                echo -ne "Are you sure you want to continue? (y/N): "
+                read -r confirm
+                if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+                    echo -e "${RED}Operation cancelled${RESET}"
+                    injector_input=""
+                    continue
+                fi
+            fi
+        break
+    done
+    injector_input=$(WINEPREFIX=$prefix_input winepath -w "$injector_input" )
+    echo -e "${GREEN}Injector Executable set as: ${injector_input}${RESET}"
+    echo
+
+
+    # Automatic download for kshook.dll
+    echo -ne "${LIGHT_MAGENTA}Would you like to automatically download and extract ${LIGHT_YELLOW}kshook.dll${RESET}? [y/N] ${RESET} "
+    read -r download_confirm
+    if [[ "$download_confirm" =~ ^[Yy]$ ]]; then
+        echo -e "${LIGHT_GREEN}Downloading kshook.dll...${RESET}"
+        temp_dir=$(mktemp -d -p /tmp)
+        if curl -L -o "$temp_dir/kshook.zip" "https://djtrackers.com/kshook/latest.zip"; then
+            echo -e "${LIGHT_GREEN}Extracting kshook.dll...${RESET}"
+            echo
+            if command -v unzip >/dev/null 2>&1; then
+                unzip -q "$temp_dir/kshook.zip" -d "$temp_dir"
+                if [[ -f "$temp_dir/kshook.dll" ]]; then
+                    if [[ -n "$sdvx_folder" ]]; then
+                        echo -e "${LIGHT_GREEN}Using existing known SDVX folder path: $sdvx_folder${RESET}"
+                    else
+                        echo -e "Enter the path to your SDVX game folder (The same folder where you put ${LIGHT_YELLOW}kshook.dll${RESET} and its configuration JSON)"
+                        echo -e "This is typically the '${LIGHT_YELLOW}drive_c/Games/SOUND VOLTEX EXCEED GEAR${RESET}' inside of your ${LIGHT_YELLOW}WINE Prefix${RESET}"
+                        read -e -r sdvx_folder
+                    fi
+                    sdvx_folder=$(sanitize_path "$sdvx_folder")
+                    if [[ -d "$sdvx_folder" ]]; then
+                        cp "$temp_dir/kshook.dll" "$sdvx_folder/"
+                        echo -e "${GREEN}kshook.dll copied to: $sdvx_folder/kshook.dll${RESET}"
+                        dll_input=$sdvx_folder/kshook.dll
+                    else
+                        echo -e "${RED}ERROR: SDVX game folder not found: $sdvx_folder${RESET}"
+                    fi
+                else
+                    echo -e "${RED}ERROR: kshook.dll not found in the downloaded archive${RESET}"
+                fi
+            else
+                echo -e "${RED}ERROR: unzip command not found. Please install unzip.${RESET}"
+            fi
+        else
+            echo -e "${RED}ERROR: Failed to download kshook.dll${RESET}"
+        fi
+        rm -rf "$temp_dir"
+    fi
+    # Manual enter path to kshook dll
+    while [[ -z $dll_input ]]; do
+        echo -e "Enter the path to ${LIGHT_GREEN}'kshook.dll'${RESET} (A Linux/UNIX-styled path): "
+        echo -e "It is recommended to put this file in your SDVX6 EAC folder (typically in ${LIGHT_YELLOW}drive_c/Games/SOUND VOLTEX EXCEED GEAR${RESET} of your selected WINE Prefix)"
+        read -e -r dll_input
+        dll_input=$(sanitize_path "$dll_input")
+        if [[ -z "$dll_input" ]]; then
+            echo -e "${RED}ERROR: Path cannot be empty${RESET}"
+            dll_input=""
+            continue
+        fi
+
+        if [[ ! -f "$dll_input" ]]; then
+            echo -e "${RED}ERROR: File not found: $dll_input${RESET}"
+            dll_input=""
+            continue
+        fi
+        if [[ "$dll_input" != *.dll ]]; then
+                echo -e "${LIGHT_YELLOW}WARNING: The specified path does not end with '.dll': $dll_input${RESET}"
+                echo -ne "Are you sure you want to continue? (y/N): "
+                read -r confirm
+                if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+                    echo -e "${RED}Operation cancelled${RESET}"
+                    dll_input=""
+                    continue
+                fi
+            fi
+        break
+    done
+    kshook_raw_path=$dll_input
+    dll_input=$(WINEPREFIX=$prefix_input winepath -w "$dll_input" )
+    echo -e "${GREEN}kshook.dll Path set as: ${injector_input}${RESET}"
+    echo
+
+
+    # kshook CONFIG File
+    config_input=""
+    while [[ -z $config_input ]]; do
+        echo -ne "Enter the path to where you downloaded your ${LIGHT_GREEN}.kshook.json${RESET} configuration file: "
+        read -e -r config_input
+        config_input=$(sanitize_path "$config_input")
+        if [[ -z "$config_input" ]]; then
+            echo -e "${RED}ERROR: Path cannot be empty${RESET}"
+            config_input=""
+            continue
+        fi
+        if [[ ! -f "$config_input" ]]; then
+            echo -e "${RED}ERROR: File not found: $config_input${RESET}"
+            config_input=""
+            continue
+        fi
+        if [[ "$config_input" != *.kshook.json ]]; then
+                echo -e "${LIGHT_YELLOW}WARNING: The specified path does not end with '.kshook.json': $config_input${RESET}"
+                echo -ne "Are you sure you want to continue? (y/N): "
+                read -r confirm
+                if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+                    echo -e "${RED}Operation cancelled${RESET}"
+                    config_input=""
+                    continue
+                fi
+            fi
+        break
+        break
+    done
+
+    echo -e "${GREEN}Config file found: ${config_input}${RESET}"
+
+    if [[ -n "$kshook_raw_path" ]]; then
+        dll_dir=$(dirname "$kshook_raw_path")
+        config_filename=$(basename "$config_input")
+        target_config_path="${dll_dir}/${config_filename}"
+        if [[ "$config_input" != "$target_config_path" ]]; then
+            echo -e "Moving config file to kshook DLL directory: ${LIGHT_GREEN}${dll_dir}${RESET}"
+            mkdir -p "$dll_dir"
+            if cp "$config_input" "$target_config_path"; then
+                echo -e "${GREEN}Config file successfully moved to: ${target_config_path}${RESET}"
+                config_input="$target_config_path"
+            else
+                echo -e "${RED}ERROR: Failed to move config file to DLL directory${RESET}"
+                exit 1
+            fi
+        else
+            echo -e "${GREEN}Config file is already in the DLL directory${RESET}"
+        fi
+    else
+        echo -e "${LIGHT_YELLOW}WARNING: DLL path not set, config file will remain in current location${RESET}"
+    fi
+
+
+
+    # Confirm the configuration
+    echo
+    echo "${LIGHT_RED}[*] Configuration summary:${RESET}"
+    echo "  PREFIX: $prefix_input"
+    echo "  INJECTOR: $injector_input"
+    echo "  DLL: $dll_input"
+    echo "  PROCESS_NAME: sv6c.exe (default)"
+    echo
+
+    echo -n "Save this configuration? [y/N]: "
+    read -r response
+    if [[ "$response" == "n" || "$response" == "N" ]]; then
+        echo "[*] Configuration not saved."
+        exit 0
+    fi
+
+    # Write configuration file
+    cat > "$full_config_path" << EOF
+# kshook-wine configuration file
+# Generated on $(date)
+
+# WINEPREFIX path (Linux directory containing drive_c)
+PREFIX="$prefix_input"
+
+# Path to the injector executable (Windows path)
+INJECTOR="$injector_input"
+
+# Path to the DLL file to inject (Windows path)
+DLL="$dll_input"
+
+# Target process name (default: sv6c.exe)
+PROCESS_NAME="sv6c.exe"
+EOF
+
+    echo "[*] Configuration saved to: $full_config_path"
+    echo
+    echo "[*] You can now use kshook-wine with the saved configuration."
+
+    exit 0
+}
+
+# Check for init command first
+if [[ "${1:-}" == "init" ]]; then
+    init_config
+    exit 0
+fi
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --prefix) PREFIX="$2"; shift 2;;
+        --injector) INJECTOR="$2"; shift 2;;
+        --dll) DLL="$2"; shift 2;;
+        --process-name) PROCESS_NAME="$2"; shift 2;;
+        -h|--help) usage;;
+        *) echo "Unknown arg: $1"; usage;;
+    esac
+done
+
+# Load configuration if it exists
+load_config() {
+    local config_path="$CONFIG_DIR/$CONFIG_FILE"
+    if [[ -f "$config_path" ]]; then
+        source "$config_path"
+        return 0
+    fi
+    return 1
+}
+
+# Check if all required parameters are present
+check_required_params() {
+    local missing=()
+
+    [[ -z "$PREFIX" ]] && missing+=("PREFIX")
+    [[ -z "$INJECTOR" ]] && missing+=("INJECTOR")
+    [[ -z "$DLL" ]] && missing+=("DLL")
+    [[ -z "$PROCESS_NAME" ]] && missing+=("PROCESS_NAME")
+
+    if [[ ${#missing[@]} -gt 0 ]]; then
+        echo "ERROR: Run 'kshook-wine init' before attempting to inject"
+        echo
+        echo "Or invoke injection directly by providing all necessary paths listed in './kshook-wine --help'"
+        exit 1
+    fi
+}
+
+# Load config first, then check if all required params are present
+load_config || true
+check_required_params
+
+echo "PREFIX: $PREFIX"
+echo "INJECTOR: $INJECTOR"
+echo "DLL: $DLL"
+echo "PROCESS_NAME: $PROCESS_NAME"
+
+# Function to check if sv6c.exe is running
+check_process_running() {
+    ps aux | grep -i "sv6c.exe" | grep -v grep >/dev/null 2>&1
+}
+
+# Wait for sv6c.exe to start
+echo
+echo -e "${LIGHT_YELLOW}Waiting for sv6c.exe to start...${RESET}"
+echo -e "Please launch SOUND VOLTEX EXCEED GEAR now."
+
+while ! check_process_running; do
+    echo -ne "${LIGHT_YELLOW}.${RESET}"
+    sleep 2
+done
+
+echo
+echo -e "${GREEN}sv6c.exe detected! Starting injection...${RESET}"
+
+# Execute the injection
+echo -e "Executing: ${LIGHT_GREEN}WINEPREFIX=\"$PREFIX\" wine '$INJECTOR' --process-name $PROCESS_NAME --inject '$DLL'${RESET}"
+
+if WINEPREFIX="$PREFIX" wine "$INJECTOR" --process-name "$PROCESS_NAME" --inject "$DLL"; then
+    echo -e "${GREEN}kshook Injection complete!${RESET}"
+else
+    echo -e "${RED}ERROR: kshook Injection failed${RESET}"
+    exit 1
+fi
