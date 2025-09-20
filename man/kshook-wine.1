@@ -1,0 +1,79 @@
+.TH KSHOOK-WINE 1 "September 2025" "kshook-wine 1.0" "User Commands"
+.SH NAME
+kshook-wine \- SOUND VOLTEX EXCEED GEAR KONASTE HOOK Wine injector
+.SH SYNOPSIS
+.B kshook-wine
+.RI [ options ]
+.br
+.B kshook-wine init
+.SH DESCRIPTION
+.B kshook-wine
+is a helper script to inject the
+.BR kshook.dll
+library into the SOUND VOLTEX EXCEED GEAR (Konaste) process running under Wine,
+allowing score submission to a Tachi instance.
+
+It supports both an interactive configuration mode and direct command-line
+arguments.
+
+.SH COMMANDS
+.TP
+.B init
+Run interactive initialization to set up paths to Wine prefix, Injector.exe,
+kshook.dll, and the configuration file. Creates a configuration file in
+~/.config/kshook-wine/config.
+
+.SH OPTIONS
+.TP
+.BR \-\-prefix " " PATH
+Path to the Wine prefix directory (Linux path containing drive_c).
+.TP
+.BR \-\-injector " " PATH
+Windows path to Injector.exe used for DLL injection.
+.TP
+.BR \-\-dll " " PATH
+Windows path to the DLL to inject (typically kshook.dll).
+.TP
+.BR \-\-process\-name " " NAME
+Target process name (default: sv6c.exe).
+.TP
+.BR \-h ", " \-\-help
+Show help and usage.
+
+.SH EXAMPLES
+Initialize configuration interactively:
+.PP
+.EX
+kshook-wine init
+.EE
+
+Inject using saved configuration:
+.PP
+.EX
+kshook-wine
+.EE
+
+Inject with explicit paths (bypassing config):
+.PP
+.EX
+kshook-wine --prefix ~/.local/share/konaste \\
+  --injector "C:\\\\Games\\\\SOUND VOLTEX EXCEED GEAR\\\\Injector.exe" \\
+  --dll "C:\\\\Games\\\\SOUND VOLTEX EXCEED GEAR\\\\kshook.dll"
+.EE
+
+.SH FILES
+.TP
+.I ~/.config/kshook-wine/config
+User configuration file storing paths to Wine prefix, Injector, DLL, and
+process name.
+
+.SH SEE ALSO
+.BR wine (1),
+.BR konaste-linux (7)
+.br
+Injector.exe project: https://github.com/nefarius/Injector
+.br
+Konaste Linux helper: https://github.com/mizztgc/konaste-linux
+
+.SH AUTHOR
+Written by pinapelz for use with SOUND VOLTEX EXCEED GEAR on Wine/Linux. See respective repositories for tools used
