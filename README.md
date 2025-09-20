@@ -8,6 +8,13 @@ kshook is a network forwarder for scores obtained on SDVX KONASTE, and is primar
 > [!IMPORTANT]
 > kshook-wine assumes that you already have SDVX KONASTE installed and it is in a playable state. If you haven't already done this, I suggest using the [konaste-linux](https://github.com/mizztgc/konaste-linux) which streamlines WINE setup and launching
 
+Download the `kshook-wine` script directly from this repository
+
+Alternatively if you are on an Arch-based operating system you can also download the script through the AUR
+```bash
+yay -S kshook-wine
+```
+
 ## Setup
 An interactive setup tool is available via running
 ```bash

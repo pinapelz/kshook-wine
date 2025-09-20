@@ -19,7 +19,6 @@ backup=()
 options=()
 changelog=
 source=("$url/archive/refs/tags/$pkgver.zip")
-#source=("konaste-linux-v${pkgver}.tar.gz")
 noextract=()
 sha256sums=('9f0e083bcb985120e733cf200e5ac4db498816671877a6acc72be25d6610587a')
 validpgpkeys=()
